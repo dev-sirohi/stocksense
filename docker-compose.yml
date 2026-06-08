@@ -1,0 +1,15 @@
+services:
+    db:
+        image: pgvector/pgvector:pg16
+        container_name: stocksense_db
+        environment:
+            POSTGRES_USER: stocksense
+            POSTGRES_PASSWORD: stocksense123
+            POSTGRES_DB: stocksense
+        ports:
+            - "5432:5432"
+        volumes:
+            - pgdata:/var/lib/postgresql/data
+
+volumes:
+    pgdata:

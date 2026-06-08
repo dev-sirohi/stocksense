@@ -1,0 +1,34 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Alembic migrations (keep folder, ignore generated files)
+alembic/versions/*.py
+!alembic/versions/.gitkeep
+
+# Node / React
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+.npm
+
+# Docker
+docker-volumes/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
