@@ -1,16 +1,3 @@
-"""
-seed.py - Populate the database with realistic Indian FMCG inventory data.
-
-Role in system: Run once after migrations to create 500 SKUs and ~1500 inventory
-records. Guarantees enough "interesting" data for the dashboard to always look
-meaningful: at least 20 expiring soon, 10 already expired, 30 low stock.
-
-Python note: This is a standalone script run with 'python -m app.seed'.
-Because database.py now uses an async engine, we use asyncio.run() to run the
-async seed() function from synchronous script context. C# equivalent:
-Task.Run(() => SeedAsync()).Wait() — but asyncio.run() is the idiomatic way.
-"""
-
 import asyncio
 import random
 from datetime import date, timedelta
@@ -106,15 +93,6 @@ LOCATIONS = (
 
 
 def _generate_skus(target_count: int = 500) -> list[SKU]:
-    """
-    Generate SKU model objects without saving them.
-
-    Python note: This is a plain synchronous function — no DB calls here.
-    It just builds Python objects in memory. We pass them to the async session later.
-
-    Returns:
-        List of unsaved SKU instances.
-    """
     skus: list[SKU] = []
     seen_codes: set[str] = set()
     per_category = target_count // len(CATEGORIES)
@@ -162,20 +140,6 @@ def _generate_skus(target_count: int = 500) -> list[SKU]:
 
 
 def _generate_records(skus: list[SKU]) -> list[InventoryRecord]:
-    """
-    Generate inventory records ensuring minimum alert counts for the dashboard.
-
-    Guaranteed minimums:
-    - 20 SKUs with at least one batch expiring within 7 days
-    - 10 SKUs with at least one already-expired batch
-    - 30 SKUs with total stock ≤ reorder level (low stock)
-
-    Without this guarantee, the dashboard might show empty alert tables with
-    random seed data — which looks broken during a demo.
-
-    Python note: random.sample() picks items without replacement — like
-    C# Enumerable.OrderBy(_ => Guid.NewGuid()).Take(n).
-    """
     records: list[InventoryRecord] = []
     today = date.today()
 
@@ -192,7 +156,7 @@ def _generate_records(skus: list[SKU]) -> list[InventoryRecord]:
     )
 
     # Track which SKUs have received their guaranteed scenario
-    guaranteed_expiring: set[int] = set()  # index into skus list
+    guaranteed_expiring: set[int] = set()
     guaranteed_expired: set[int] = set()
     guaranteed_low_stock: set[int] = set()
 
@@ -247,17 +211,11 @@ def _generate_records(skus: list[SKU]) -> list[InventoryRecord]:
 
 
 async def seed() -> None:
-    """
-    Main seed function. Creates SKUs and inventory records if the DB is empty.
-
-    Why async: uses AsyncSessionLocal which requires async context manager,
-    and SQLAlchemy's async flush/commit require await.
-    """
     # Python note: 'async with' creates a new AsyncSession for this function's
     # lifetime, closing it automatically when the block exits.
     async with AsyncSessionLocal() as db:
         # Check if already seeded to avoid duplicates on repeated runs
-        count_result = await db.execute(select(SKU).limit(1))  # await: Postgres SELECT
+        count_result = await db.execute(select(SKU).limit(1))
         existing = count_result.scalar_one_or_none()
         if existing is not None:
             print("Database already seeded. Skipping.")
@@ -272,13 +230,13 @@ async def seed() -> None:
         # flush() sends the INSERTs to Postgres and assigns auto-increment IDs,
         # but does NOT commit the transaction. We need the IDs before creating
         # InventoryRecord objects that reference sku.id via the relationship.
-        await db.flush()  # await: sends INSERTs, receives auto-generated IDs
+        await db.flush()
 
         print("Generating inventory records...")
         records = _generate_records(skus)
 
         db.add_all(records)
-        await db.commit()  # await: commits the entire transaction to Postgres
+        await db.commit()
 
         print(f"Done. Seeded {len(skus)} SKUs and {len(records)} inventory records.")
 
@@ -287,6 +245,4 @@ if __name__ == "__main__":
     # asyncio.run() creates a new event loop, runs the coroutine to completion,
     # then closes the loop. This is how you run async code from a synchronous
     # script entry point.
-    # Python note: C# equivalent is Task.GetAwaiter().GetResult() or
-    # Task.Run(() => seed()).Wait() — but asyncio.run() is idiomatic Python.
     asyncio.run(seed())

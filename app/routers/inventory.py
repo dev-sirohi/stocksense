@@ -1,20 +1,3 @@
-"""
-routers/inventory.py - All inventory-related API endpoints.
-
-Role in system: The HTTP interface for inventory data. Routes delegate business
-logic to services (embeddings, NLQ) and database queries. Redis caching is applied
-explicitly in each route — the cache hit flag is written to request.state so the
-PerformanceMiddleware can record it in api_metrics.
-
-All functions are async because they await either Postgres queries (via AsyncSession)
-or Redis lookups (via cache helpers). Non-async functions would BLOCK the event loop
-during I/O, preventing other requests from being served concurrently.
-
-Python note: In C# ASP.NET, controller methods return IActionResult and are marked
-async Task<IActionResult>. In FastAPI, route functions can return plain dicts, Pydantic
-models, or Response objects — FastAPI serialises to JSON automatically.
-"""
-
 import math
 from datetime import date, timedelta
 from typing import Any, Optional
@@ -30,11 +13,6 @@ from app.cache import cache_get, cache_set, make_cache_key, TTL_SKU_LISTS, TTL_S
 
 router = APIRouter()
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SKU endpoints
-# ══════════════════════════════════════════════════════════════════════════════
-
 @router.get("/skus")
 async def get_skus(
     request: Request,  # needed so we can set request.state.cache_hit for middleware
@@ -43,40 +21,26 @@ async def get_skus(
     limit: int = Query(default=50, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    Return a paginated list of SKUs with optional category filter.
-
-    Why async: cache_get() awaits a Redis TCP call; db.execute() awaits Postgres.
-    If either is skipped (cache hit), only Redis is hit — no Postgres round-trip.
-
-    Cache strategy: SKU metadata (name, code, category) rarely changes, so we
-    cache for 300 seconds. A category filter gets its own cache key.
-    """
     cache_key = make_cache_key("skus", category=category, skip=skip, limit=limit)
 
-    # ── Cache lookup ──────────────────────────────────────────────────────────
-    cached = await cache_get(cache_key)  # await: Redis GET
+    cached = await cache_get(cache_key)
     if cached is not None:
-        request.state.cache_hit = True   # signal to PerformanceMiddleware
+        request.state.cache_hit = True # signal to PerformanceMiddleware
         return cached
     request.state.cache_hit = False
 
-    # ── Database query ────────────────────────────────────────────────────────
-    # SQLAlchemy 2.0 style: select() instead of db.query().
-    # Python note: method chaining works because each .where()/.offset()/etc.
-    # returns the same Select object — identical to C# LINQ fluent interface.
     count_stmt = select(func.count()).select_from(SKU)
     if category:
         count_stmt = count_stmt.where(SKU.category == category)
 
-    total: int = (await db.execute(count_stmt)).scalar() or 0  # await: Postgres COUNT
+    total: int = (await db.execute(count_stmt)).scalar() or 0
 
     stmt = select(SKU)
     if category:
         stmt = stmt.where(SKU.category == category)
     stmt = stmt.offset(skip).limit(limit)
 
-    skus = (await db.execute(stmt)).scalars().all()  # await: Postgres SELECT
+    skus = (await db.execute(stmt)).scalars().all()
 
     result = {
         "total": total,
@@ -98,7 +62,7 @@ async def get_skus(
         ],
     }
 
-    await cache_set(cache_key, result, TTL_SKU_LISTS)  # await: Redis SET
+    await cache_set(cache_key, result, TTL_SKU_LISTS)
     return result
 
 
@@ -108,25 +72,16 @@ async def get_sku(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    Return a single SKU by its integer ID.
-
-    Why async: db.execute() is an async network call to Postgres.
-    404 is raised if the SKU doesn't exist — FastAPI converts this to an HTTP 404
-    response automatically. C# equivalent: return NotFound().
-    """
     cache_key = make_cache_key("sku_detail", sku_id=sku_id)
-    cached = await cache_get(cache_key)   # await: Redis GET
+    cached = await cache_get(cache_key)
     if cached is not None:
         request.state.cache_hit = True
         return cached
     request.state.cache_hit = False
 
     stmt = select(SKU).where(SKU.id == sku_id)
-    sku = (await db.execute(stmt)).scalar_one_or_none()  # await: Postgres SELECT
+    sku = (await db.execute(stmt)).scalar_one_or_none()
 
-    # Python note: 'if not sku' catches both None (not found) and falsy ORM objects.
-    # C# equivalent: if (sku == null) return NotFound();
     if not sku:
         raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
 
@@ -144,7 +99,7 @@ async def get_sku(
         "has_embedding": sku.embedding is not None,
     }
 
-    await cache_set(cache_key, result, TTL_SKU_LISTS)  # await: Redis SET
+    await cache_set(cache_key, result, TTL_SKU_LISTS)
     return result
 
 
@@ -153,25 +108,19 @@ async def get_categories(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Return the distinct list of product categories."""
     cache_key = "categories:all"
-    cached = await cache_get(cache_key)   # await: Redis GET
+    cached = await cache_get(cache_key)
     if cached is not None:
         request.state.cache_hit = True
         return cached
     request.state.cache_hit = False
 
     stmt = select(SKU.category).distinct().order_by(SKU.category)
-    rows = (await db.execute(stmt)).all()   # await: Postgres SELECT
+    rows = (await db.execute(stmt)).all()
 
     result = {"categories": [r[0] for r in rows]}
-    await cache_set(cache_key, result, TTL_SKU_LISTS)  # await: Redis SET
+    await cache_set(cache_key, result, TTL_SKU_LISTS)
     return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Stock levels
-# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/stock")
 async def get_stock(
@@ -179,16 +128,8 @@ async def get_stock(
     sku_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    Return current stock levels, optionally filtered to a single SKU.
-
-    Aggregates quantity across all batches of each SKU.
-    Cache TTL is short (60s) because stock changes with every sale/receipt.
-
-    Why async: db.execute() awaits a GROUP BY aggregate query on Postgres.
-    """
     cache_key = make_cache_key("stock", sku_id=sku_id)
-    cached = await cache_get(cache_key)   # await: Redis GET
+    cached = await cache_get(cache_key)
     if cached is not None:
         request.state.cache_hit = True
         return cached
@@ -210,7 +151,7 @@ async def get_stock(
     if sku_id:
         stmt = stmt.where(SKU.id == sku_id)
 
-    rows = (await db.execute(stmt)).all()  # await: Postgres GROUP BY aggregate
+    rows = (await db.execute(stmt)).all()
 
     result = {
         "items": [
@@ -228,27 +169,16 @@ async def get_stock(
         ]
     }
 
-    await cache_set(cache_key, result, TTL_STOCK_DATA)  # await: Redis SET
+    await cache_set(cache_key, result, TTL_STOCK_DATA)
     return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Alerts
-# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/alerts")
 async def get_alerts(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    Return three alert lists: expiring soon, already expired, and low stock.
-
-    Cache TTL is 30 seconds — alerts are time-sensitive dashboard data.
-    Why async: three separate Postgres queries are awaited sequentially.
-    """
     cache_key = "alerts:current"
-    cached = await cache_get(cache_key)   # await: Redis GET
+    cached = await cache_get(cache_key)
     if cached is not None:
         request.state.cache_hit = True
         return cached
@@ -257,7 +187,7 @@ async def get_alerts(
     today = date.today()
     warn_date = today + timedelta(days=7)
 
-    # ── Expiring soon ─────────────────────────────────────────────────────────
+    # Expiring soon
     expiring_stmt = (
         select(InventoryRecord, SKU)
         .join(SKU, InventoryRecord.sku_id == SKU.id)
@@ -267,10 +197,9 @@ async def get_alerts(
         .where(InventoryRecord.quantity > 0)
         .order_by(InventoryRecord.expiry_date.asc())
     )
-    # await: Postgres JOIN + filter query
     expiring_rows = (await db.execute(expiring_stmt)).all()
 
-    # ── Already expired ───────────────────────────────────────────────────────
+    # Already expired
     expired_stmt = (
         select(InventoryRecord, SKU)
         .join(SKU, InventoryRecord.sku_id == SKU.id)
@@ -279,9 +208,9 @@ async def get_alerts(
         .where(InventoryRecord.quantity > 0)
         .order_by(InventoryRecord.expiry_date.asc())
     )
-    expired_rows = (await db.execute(expired_stmt)).all()  # await: Postgres SELECT
+    expired_rows = (await db.execute(expired_stmt)).all()
 
-    # ── Low stock — sum quantity per SKU, compare to reorder level ────────────
+    # Low stock — sum quantity per SKU, compare to reorder level
     stock_subq = (
         select(
             InventoryRecord.sku_id,
@@ -296,7 +225,7 @@ async def get_alerts(
         .where(stock_subq.c.total_qty <= SKU.reorder_level)
         .order_by(stock_subq.c.total_qty.asc())
     )
-    low_stock_rows = (await db.execute(low_stock_stmt)).all()  # await: Postgres SELECT
+    low_stock_rows = (await db.execute(low_stock_stmt)).all()
 
     result: dict[str, Any] = {
         "expiring_soon": [
@@ -345,13 +274,8 @@ async def get_alerts(
         },
     }
 
-    await cache_set(cache_key, result, TTL_ALERTS)  # await: Redis SET
+    await cache_set(cache_key, result, TTL_ALERTS)
     return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Semantic search
-# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/search")
 async def semantic_search(
@@ -380,7 +304,7 @@ async def semantic_search(
     embeddings), so we cache for 120 seconds.
     """
     cache_key = make_cache_key("search", q=q.lower().strip())
-    cached = await cache_get(cache_key)   # await: Redis GET
+    cached = await cache_get(cache_key)
     if cached is not None:
         request.state.cache_hit = True
         return cached
@@ -415,7 +339,7 @@ async def semantic_search(
     )
 
     try:
-        rows = (await db.execute(stmt)).all()  # await: pgvector cosine distance query
+        rows = (await db.execute(stmt)).all()
     except Exception as exc:
         raise HTTPException(
             status_code=503,
@@ -450,10 +374,6 @@ async def semantic_search(
     return result
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Natural Language Query (streaming)
-# ══════════════════════════════════════════════════════════════════════════════
-
 @router.get("/ask")
 async def ask_vikram(
     q: str = Query(..., min_length=3, description="Plain English warehouse question"),
@@ -467,8 +387,7 @@ async def ask_vikram(
 
     Python note: StreamingResponse is FastAPI's built-in for returning chunked HTTP
     responses. The 'generator' parameter accepts any async iterable — including our
-    async generator function from nlq_service. C# equivalent is IActionResult with
-    a chunked transfer encoding stream.
+    async generator function from nlq_service.
 
     Why NOT cached: every response depends on real-time DB state AND is streamed —
     caching a stream is non-trivial and the latency difference is negligible vs the

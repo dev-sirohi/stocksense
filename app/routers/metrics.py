@@ -1,13 +1,3 @@
-"""
-routers/metrics.py - API performance metrics endpoints.
-
-Role in system: Reads the api_metrics table and returns aggregated statistics.
-This is the data source for the Metrics page in the React frontend — the page
-that demonstrates caching impact with before/after response time comparisons.
-
-Exposed at: GET /api/metrics (registered in main.py)
-"""
-
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -23,17 +13,6 @@ router = APIRouter()
 
 @router.get("/")
 async def get_metrics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """
-    Return aggregated API performance statistics.
-
-    Why async: all SQLAlchemy 2.0 queries with AsyncSession require await.
-    Both the per-endpoint aggregation and slowest-requests queries hit Postgres.
-
-    Returns:
-        - endpoints: list of per-endpoint stats (avg, P95, count, cache hit rate)
-        - slowest_today: top 10 slowest requests from today
-        - generated_at: timestamp so the frontend knows how fresh the data is
-    """
     # ── Per-endpoint aggregates ───────────────────────────────────────────────
     # percentile_cont(0.95) WITHIN GROUP (ORDER BY col) is PostgreSQL's
     # ordered-set aggregate for computing percentiles.
@@ -60,7 +39,6 @@ async def get_metrics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         .group_by(APIMetric.endpoint, APIMetric.method)
         .order_by(func.count(APIMetric.id).desc())
     )
-    # await: executes the SELECT against Postgres
     stats_result = await db.execute(stats_stmt)
     stats_rows = stats_result.all()
 
@@ -75,12 +53,9 @@ async def get_metrics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         .order_by(APIMetric.response_time_ms.desc())
         .limit(10)
     )
-    slowest_result = await db.execute(slowest_stmt)   # await: Postgres SELECT
+    slowest_result = await db.execute(slowest_stmt)
     slowest_rows = slowest_result.scalars().all()
 
-    # ── Serialise results ─────────────────────────────────────────────────────
-    # Python note: list comprehension [ expr for item in iterable ] is equivalent
-    # to C# LINQ .Select(item => expr).ToList().
     endpoint_stats = [
         {
             "endpoint": r.endpoint,

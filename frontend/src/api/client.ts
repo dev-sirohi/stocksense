@@ -1,21 +1,10 @@
-/**
- * api/client.ts — Axios instance and typed API helper functions.
- *
- * All backend calls go through this module. Centralising them here means
- * changing the base URL (e.g. in production) only requires editing one line.
- */
-
 import axios from "axios";
 
-// Vite's dev proxy forwards /api → http://localhost:8000/api
-// In production, replace with the full backend URL.
 export const api = axios.create({
   baseURL: "/api",
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
 });
-
-// ── TypeScript interfaces matching the backend response shapes ─────────────
 
 export interface SKU {
   id: number;
@@ -127,8 +116,6 @@ export interface SKUListResponse {
   page: number;
   items: SKU[];
 }
-
-// ── API call functions ─────────────────────────────────────────────────────
 
 export const fetchAlerts = () =>
   api.get<AlertsResponse>("/inventory/alerts").then((r) => r.data);
