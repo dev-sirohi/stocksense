@@ -10,6 +10,11 @@ from app.routers import metrics as metrics_router
 from app.middleware.performance import PerformanceMiddleware
 from app.cache import close_redis
 
+from pathlib import Path
+
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
 load_dotenv()
 
 # Fail loudly on startup if required env vars are missing.
@@ -41,17 +46,18 @@ app = FastAPI(
 # Performance middleware - outermost to include all other middlewares
 app.add_middleware(PerformanceMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Response-Time-Ms", "X-Cache-Hit"],
-)
+if str(os.getenv("IS_PRODUCTION")) != "1":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Response-Time-Ms", "X-Cache-Hit"],
+    )
 
 # Routers
 app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
@@ -66,3 +72,21 @@ async def health_check() -> dict[str, str]:
     Returns 200 as long as the process is alive and imports succeeded.
     """
     return {"status": "ok", "version": "2.0.0"}
+
+
+frontend_dist = Path("frontend/dist")
+
+if frontend_dist.exists():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=frontend_dist / "assets"),
+        name="assets",
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def serve_root():
+        return FileResponse(frontend_dist / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_react_app(full_path: str):
+        return FileResponse(frontend_dist / "index.html")

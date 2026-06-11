@@ -1,4 +1,23 @@
 services:
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: stocksense_app
+        ports:
+            - "8000:8000"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+
+        environment:
+            DATABASE_URL: postgresql://stocksense:stocksense123@db:5432/stocksense
+            REDIS_URL: redis://redis:6379
+            IS_PRODUCTION: "0"
+            OPENAI_API_KEY: "abcd"
+            IS_AI_ENABLED: "0"
     db:
         image: pgvector/pgvector:pg16
         container_name: stocksense_db
@@ -11,7 +30,7 @@ services:
         volumes:
             - pgdata:/var/lib/postgresql/data
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U stocksense -d stocksense"]
+            test: [ "CMD-SHELL", "pg_isready -U stocksense -d stocksense" ]
             interval: 5s
             timeout: 5s
             retries: 5
@@ -27,7 +46,7 @@ services:
         volumes:
             - redisdata:/data
         healthcheck:
-            test: ["CMD", "redis-cli", "ping"]
+            test: [ "CMD", "redis-cli", "ping" ]
             interval: 5s
             timeout: 3s
             retries: 5

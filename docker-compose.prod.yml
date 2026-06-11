@@ -1,0 +1,15 @@
+services:
+  app:
+    restart: always
+    environment:
+      IS_PRODUCTION: "1"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      DATABASE_URL: "${DATABASE_URL}"
+
+  db:
+    ports: []
+    restart: always
+
+  redis:
+    ports: []
+    restart: always

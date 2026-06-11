@@ -2,6 +2,9 @@ import math
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import os
+from dotenv import load_dotenv
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,9 +12,20 @@ from sqlalchemy import func, select, case
 
 from app.database import get_db
 from app.models.inventory import SKU, InventoryRecord
-from app.cache import cache_get, cache_set, make_cache_key, TTL_SKU_LISTS, TTL_STOCK_DATA, TTL_ALERTS, TTL_SEARCH_RESULTS
+from app.cache import (
+    cache_get,
+    cache_set,
+    make_cache_key,
+    TTL_SKU_LISTS,
+    TTL_STOCK_DATA,
+    TTL_ALERTS,
+    TTL_SEARCH_RESULTS,
+)
 
 router = APIRouter()
+
+load_dotenv()
+
 
 @router.get("/skus")
 async def get_skus(
@@ -25,7 +39,7 @@ async def get_skus(
 
     cached = await cache_get(cache_key)
     if cached is not None:
-        request.state.cache_hit = True # signal to PerformanceMiddleware
+        request.state.cache_hit = True  # signal to PerformanceMiddleware
         return cached
     request.state.cache_hit = False
 
@@ -122,6 +136,7 @@ async def get_categories(
     await cache_set(cache_key, result, TTL_SKU_LISTS)
     return result
 
+
 @router.get("/stock")
 async def get_stock(
     request: Request,
@@ -171,6 +186,7 @@ async def get_stock(
 
     await cache_set(cache_key, result, TTL_STOCK_DATA)
     return result
+
 
 @router.get("/alerts")
 async def get_alerts(
@@ -267,7 +283,10 @@ async def get_alerts(
             for r in low_stock_rows
         ],
         "summary": {
-            "total_skus": (await db.execute(select(func.count()).select_from(SKU))).scalar() or 0,
+            "total_skus": (
+                await db.execute(select(func.count()).select_from(SKU))
+            ).scalar()
+            or 0,
             "expiring_soon_count": len(expiring_rows),
             "expired_count": len(expired_rows),
             "low_stock_count": len(low_stock_rows),
@@ -276,6 +295,7 @@ async def get_alerts(
 
     await cache_set(cache_key, result, TTL_ALERTS)
     return result
+
 
 @router.get("/search")
 async def semantic_search(
@@ -313,13 +333,22 @@ async def semantic_search(
     # Embed the search query using the same model that embedded the SKU descriptions.
     # await: HTTPS call to OpenAI text-embedding-3-small
     from app.services.embedding_service import generate_embedding
+
     try:
         query_embedding = await generate_embedding(q)
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Embedding service unavailable: {exc}"
-        )
+        if (
+            str(os.getenv("IS_AI_ENABLED")) != "1"
+            or str(os.getenv("IS_PRODUCTION")) == "1"
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="AI disabled. Please try again later",
+            )
+        else:
+            raise HTTPException(
+                status_code=503, detail=f"Embedding service unavailable: {exc}"
+            )
 
     # pgvector cosine_distance() computes the angle-based distance between vectors.
     # Lower distance = more similar.
@@ -343,14 +372,23 @@ async def semantic_search(
     except Exception as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Vector search failed — have you run the embedding job? ({exc})"
+            detail=f"Vector search failed — have you run the embedding job? ({exc})",
         )
 
     if not rows:
-        raise HTTPException(
-            status_code=404,
-            detail="No embeddings found. Run: python -m app.services.embedding_service"
-        )
+        if (
+            str(os.getenv("IS_AI_ENABLED")) != "1"
+            or str(os.getenv("IS_PRODUCTION")) == "1"
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="AI disabled. Please try again later",
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="No embeddings found. Run: python -m app.services.embedding_service",
+            )
 
     result = {
         "query": q,
@@ -370,7 +408,7 @@ async def semantic_search(
         ],
     }
 
-    await cache_set(cache_key, result, TTL_SEARCH_RESULTS)  # await: Redis SET
+    await cache_set(cache_key, result, TTL_SEARCH_RESULTS)
     return result
 
 
@@ -397,6 +435,13 @@ async def ask_vikram(
     nlq_service.ask_vikram_stream). The underlying calls await DB queries and
     OpenAI's streaming API.
     """
+
+    if str(os.getenv("IS_AI_ENABLED")) != "1":
+        raise HTTPException(
+            status_code=404,
+            detail="AI disabled. Please try again later",
+        )
+
     from app.services.nlq_service import ask_vikram_stream
 
     # ask_vikram_stream is an async generator — it yields token strings as GPT produces them.

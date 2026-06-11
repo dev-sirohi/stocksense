@@ -1,0 +1,16 @@
+services:
+  app:
+    # Hot reload — reflects code changes without rebuilding image
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./app:/app/app         # mount source so --reload picks up changes
+    environment:
+      IS_PRODUCTION: "0"
+
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

@@ -22,19 +22,27 @@ if not DATABASE_URL:
 # Normalize the urls for both synchronous and asynchronous dependencies
 if "postgresql+asyncpg://" in DATABASE_URL:
     ASYNC_DATABASE_URL = DATABASE_URL
-    SYNC_DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+    SYNC_DATABASE_URL = DATABASE_URL.replace(
+        "postgresql+asyncpg://", "postgresql://", 1
+    )
 elif "postgresql+psycopg2://" in DATABASE_URL:
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
-    SYNC_DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
+    ASYNC_DATABASE_URL = DATABASE_URL.replace(
+        "postgresql+psycopg2://", "postgresql+asyncpg://", 1
+    )
+    SYNC_DATABASE_URL = DATABASE_URL.replace(
+        "postgresql+psycopg2://", "postgresql://", 1
+    )
 else:
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-    SYNC_DATABASE_URL = DATABASE_URL 
+    ASYNC_DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://", "postgresql+asyncpg://", 1
+    )
+    SYNC_DATABASE_URL = DATABASE_URL
 
 # Create engine
 __engine = create_async_engine(
     ASYNC_DATABASE_URL,
-    echo=str(os.getenv("IS_PRODUCTION")) is "1", # False for production
-    pool_pre_ping=True, # Pings with SELECT 1 before handing out a pool connection
+    echo=str(os.getenv("IS_PRODUCTION")) != "1",  # False for production
+    pool_pre_ping=True,  # Pings with SELECT 1 before handing out a pool connection
     pool_size=10,
     max_overflow=20,
 )
@@ -45,8 +53,9 @@ __asyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
-    autoflush=False, # flush puts the data into the db but commits persists it. flush is always called during commit.
+    autoflush=False,  # flush puts the data into the db but commits persists it. flush is always called during commit.
 )
+
 
 # Provide a function to get a session when needed - Usually used for dependency injection
 async def get_db():
