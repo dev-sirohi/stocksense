@@ -5,7 +5,7 @@ uvicorn[standard]==0.32.1         # ASGI server with WebSocket and HTTP/2 suppor
 # ── Database (async) ───────────────────────────────────────────────────────────
 sqlalchemy==2.0.36                # ORM + query builder (async support via 2.0 API)
 asyncpg==0.30.0                   # async PostgreSQL driver (replaces psycopg2 for async)
-#psycopg2-binary==2.9.10           # sync driver — still needed by Alembic
+psycopg2-binary==2.9.10           # sync driver — still needed by Alembic
 alembic==1.14.0                   # database migrations
 pgvector==0.3.6                   # pgvector SQLAlchemy integration for Vector columns
 
