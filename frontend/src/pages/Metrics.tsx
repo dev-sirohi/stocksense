@@ -9,7 +9,11 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { fetchMetrics, type MetricsResponse, type EndpointMetric } from "../api/client";
+import {
+  fetchMetrics,
+  type MetricsResponse,
+  type EndpointMetric,
+} from "../api/client";
 
 function ms(val: number) {
   return `${val.toFixed(1)} ms`;
@@ -24,7 +28,9 @@ function CacheBar({ pct }: { pct: number }) {
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-xs font-medium text-accent w-10 text-right">{pct.toFixed(0)}%</span>
+      <span className="text-xs font-medium text-accent w-10 text-right">
+        {pct.toFixed(0)}%
+      </span>
     </div>
   );
 }
@@ -33,6 +39,14 @@ export default function Metrics() {
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [chartData, setChartData] = useState<
+    {
+      name: string;
+      avg: number;
+      p95: number;
+      cached: number | null;
+    }[]
+  >([{ name: "", avg: 0, p95: 0, cached: null }]);
 
   const load = async () => {
     setLoading(true);
@@ -40,13 +54,33 @@ export default function Metrics() {
       setData(await fetchMetrics());
       setError(null);
     } catch {
-      setError("Failed to load metrics. Hit some endpoints first, then reload.");
+      setError(
+        "Failed to load metrics. Hit some endpoints first, then reload.",
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
+
+  const endpoints = data?.endpoints ?? [];
+
+  // Recharts data: avg vs P95 response time per endpoint
+  useEffect(() => {
+    if (!data?.endpoints) return;
+    setChartData(
+      data.endpoints.slice(0, 8).map((e: EndpointMetric) => ({
+        name:
+          e.endpoint.replace("/api/inventory/", "").replace("/api/", "") || "/",
+        avg: e.avg_response_time_ms,
+        p95: e.p95_response_time_ms,
+        cached: e.cache_hits > 0 ? e.avg_response_time_ms * 0.05 : null,
+      })),
+    );
+  }, [data]);
 
   if (loading)
     return (
@@ -59,20 +93,11 @@ export default function Metrics() {
   if (error)
     return (
       <div className="p-8">
-        <div className="card border-yellow-200 bg-yellow-50 text-yellow-800 text-sm">{error}</div>
+        <div className="card border-yellow-200 bg-yellow-50 text-yellow-800 text-sm">
+          {error}
+        </div>
       </div>
     );
-
-  const endpoints = data!.endpoints;
-
-  // Recharts data: avg vs P95 response time per endpoint
-  const chartData = endpoints.slice(0, 8).map((e: EndpointMetric) => ({
-    // Truncate long endpoint names for chart readability
-    name: e.endpoint.replace("/api/inventory/", "").replace("/api/", "") || "/",
-    avg: e.avg_response_time_ms,
-    p95: e.p95_response_time_ms,
-    cached: e.cache_hits > 0 ? e.avg_response_time_ms * 0.05 : null, // simulate cached ~5% of non-cached
-  }));
 
   return (
     <div className="p-8 space-y-8">
@@ -95,7 +120,10 @@ export default function Metrics() {
           Avg vs P95 Response Time by Endpoint
         </h2>
         <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
+          <BarChart
+            data={chartData}
+            margin={{ top: 5, right: 20, left: 10, bottom: 60 }}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis
               dataKey="name"
@@ -128,52 +156,77 @@ export default function Metrics() {
       {/* Per-endpoint stats table */}
       <section className="card p-0 overflow-hidden">
         <div className="px-6 py-4 border-b">
-          <h2 className="text-base font-semibold text-gray-900">Endpoint Statistics</h2>
+          <h2 className="text-base font-semibold text-gray-900">
+            Endpoint Statistics
+          </h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            P95 = the response time that 95% of requests complete under. High cache hit % = faster avg times.
+            P95 = the response time that 95% of requests complete under. High
+            cache hit % = faster avg times.
           </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {["Endpoint", "Method", "Requests", "Avg", "P95", "Max", "Cache Hit %"].map(
-                  (h) => <th key={h} className="table-th">{h}</th>
-                )}
+                {[
+                  "Endpoint",
+                  "Method",
+                  "Requests",
+                  "Avg",
+                  "P95",
+                  "Max",
+                  "Cache Hit %",
+                ].map((h) => (
+                  <th key={h} className="table-th">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y">
               {endpoints.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="table-td text-center py-8 text-gray-400">
+                  <td
+                    colSpan={7}
+                    className="table-td text-center py-8 text-gray-400"
+                  >
                     No metrics recorded yet. Make a few API requests first.
                   </td>
                 </tr>
               ) : (
                 endpoints.map((e) => (
-                  <tr key={`${e.method}-${e.endpoint}`} className="hover:bg-gray-50">
+                  <tr
+                    key={`${e.method}-${e.endpoint}`}
+                    className="hover:bg-gray-50"
+                  >
                     <td className="table-td font-mono text-xs text-gray-600">
                       {e.endpoint}
                     </td>
                     <td className="table-td">
                       <span className="badge-blue">{e.method}</span>
                     </td>
-                    <td className="table-td">{e.request_count.toLocaleString()}</td>
-                    <td className="table-td font-medium">{ms(e.avg_response_time_ms)}</td>
+                    <td className="table-td">
+                      {e.request_count.toLocaleString()}
+                    </td>
+                    <td className="table-td font-medium">
+                      {ms(e.avg_response_time_ms)}
+                    </td>
                     <td className="table-td">
                       <span
                         className={
                           e.p95_response_time_ms > 500
                             ? "text-red-600 font-medium"
                             : e.p95_response_time_ms > 100
-                            ? "text-yellow-600 font-medium"
-                            : "text-green-600 font-medium"
+                              ? "text-yellow-600 font-medium"
+                              : "text-green-600 font-medium"
                         }
                       >
                         {ms(e.p95_response_time_ms)}
                       </span>
                     </td>
-                    <td className="table-td text-gray-500">{ms(e.max_response_time_ms)}</td>
+                    <td className="table-td text-gray-500">
+                      {ms(e.max_response_time_ms)}
+                    </td>
                     <td className="table-td w-40">
                       <CacheBar pct={e.cache_hit_rate_pct} />
                     </td>
@@ -197,15 +250,26 @@ export default function Metrics() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {["Endpoint", "Method", "Response Time", "Status", "Cache", "Time"].map(
-                    (h) => <th key={h} className="table-th">{h}</th>
-                  )}
+                  {[
+                    "Endpoint",
+                    "Method",
+                    "Response Time",
+                    "Status",
+                    "Cache",
+                    "Time",
+                  ].map((h) => (
+                    <th key={h} className="table-th">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {data!.slowest_today.map((r, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    <td className="table-td font-mono text-xs text-gray-600">{r.endpoint}</td>
+                    <td className="table-td font-mono text-xs text-gray-600">
+                      {r.endpoint}
+                    </td>
                     <td className="table-td">
                       <span className="badge-blue">{r.method}</span>
                     </td>
@@ -213,7 +277,11 @@ export default function Metrics() {
                       {ms(r.response_time_ms)}
                     </td>
                     <td className="table-td">
-                      <span className={r.status_code < 400 ? "badge-green" : "badge-red"}>
+                      <span
+                        className={
+                          r.status_code < 400 ? "badge-green" : "badge-red"
+                        }
+                      >
                         {r.status_code}
                       </span>
                     </td>
@@ -225,7 +293,9 @@ export default function Metrics() {
                       )}
                     </td>
                     <td className="table-td text-gray-400 text-xs">
-                      {r.recorded_at ? new Date(r.recorded_at).toLocaleTimeString() : "—"}
+                      {r.recorded_at
+                        ? new Date(r.recorded_at).toLocaleTimeString()
+                        : "—"}
                     </td>
                   </tr>
                 ))}

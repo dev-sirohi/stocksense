@@ -11,7 +11,7 @@ from app.models.metrics import APIMetric
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def get_metrics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # ── Per-endpoint aggregates ───────────────────────────────────────────────
     # percentile_cont(0.95) WITHIN GROUP (ORDER BY col) is PostgreSQL's
@@ -67,9 +67,11 @@ async def get_metrics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             "p95_response_time_ms": round(float(r.p95_ms or 0), 2),
             # Cache hit rate as a percentage (0.0 – 100.0)
             "cache_hit_rate_pct": round(
-                float(r.cache_hits or 0) / float(r.request_count) * 100
-                if r.request_count
-                else 0.0,
+                (
+                    float(r.cache_hits or 0) / float(r.request_count) * 100
+                    if r.request_count
+                    else 0.0
+                ),
                 1,
             ),
             "cache_hits": int(r.cache_hits or 0),
